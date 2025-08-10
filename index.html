@@ -5,7 +5,7 @@
   <title>Prompt Generator (10 Lists)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <style>
-    :root { --maxw: 520px; }
+    :root { --maxw: 480px; }
 
     body {
       margin: 0;
@@ -50,7 +50,8 @@
     .custom-time,
     .toggle-buttons,
     .combine-panel,
-    .names-panel {
+    .names-panel,
+    .data-panel {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
@@ -294,6 +295,11 @@
       font-size: 13px;
     }
 
+    /* Data panel */
+    .data-panel button {
+      background: #444;
+    }
+
     @media (max-width: 420px) {
       button { font-size: 12px; padding: 6px 9px; }
       #stamp { font-size: 10.5px; }
@@ -305,7 +311,7 @@
 <body>
 
   <!-- Stamp -->
-  <div id="stamp">4. v.01 - Jimmy James - 10.08.2025 - 12:31</div>
+  <div id="stamp">jimmy james - 10.08.2025 - kl 13:26 - v.04</div>
 
   <div class="controls">
 
@@ -344,6 +350,13 @@
       <input type="number" id="minCustom" value="10" min="1">–
       <input type="number" id="maxCustom" value="60" min="1">s
       <button onclick="applyCustomTime()" id="customBtn">Set</button>
+    </div>
+
+    <!-- Data (Export / Import) -->
+    <div class="data-panel" aria-label="Data backup">
+      <button id="exportBtn">⬇️ Export JSON</button>
+      <button id="importBtn">⬆️ Import JSON</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none" />
     </div>
 
     <!-- Audio panel -->
@@ -447,6 +460,10 @@
     const namesPanel = document.getElementById('namesPanel');
     const combinePanel = document.getElementById('combinePanel');
     const sourceTag = document.getElementById('sourceTag');
+
+    const importBtn = document.getElementById('importBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const importFile = document.getElementById('importFile');
 
     // ===== Build dynamic UI (A–J) =====
     function buildListButtons() {
@@ -702,10 +719,10 @@
     }
     function updateVolumeUI() {
       const h = volSlider.clientHeight - 12;
-      const percent = Math.round(volume * 100);
+      const percent = Math.round(volume * h);
       volFill.style.height = Math.round(volume * h) + 'px';
       volThumb.style.transform = `translateY(${-(volume * h)}px)`;
-      volReadout.textContent = 'Volume: ' + percent + '%';
+      volReadout.textContent = 'Volume: ' + Math.round(volume*100) + '%';
       updateAudioStatus();
     }
     function setVolumeFromY(clientY) {
@@ -849,6 +866,89 @@
       window.speechSynthesis.onvoiceschanged = refresh;
       refresh();
     }
+
+    // ===== Export / Import JSON =====
+    exportBtn.addEventListener('click', () => {
+      const data = {
+        version: 'pg-10lists-v04',
+        lists,
+        names,
+        settings: {
+          soundOn, autoPlay, volume, rate,
+          combineMode, combineSelection: Array.from(combineSelection),
+          randomVoicePerPrompt
+        }
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'prompt-generator-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        if (!data || typeof data !== 'object') throw new Error('Invalid file');
+
+        // load lists/names
+        if (data.lists && typeof data.lists === 'object') {
+          LETTERS.forEach(l => { lists[l] = Array.isArray(data.lists[l]) ? data.lists[l] : []; });
+          LETTERS.forEach(l => localStorage.setItem('promptList_' + l, JSON.stringify(lists[l])));
+        }
+        if (data.names && typeof data.names === 'object') {
+          names = { ...defaultNames, ...data.names };
+          localStorage.setItem('promptListNames', JSON.stringify(names));
+        }
+        // load settings
+        if (data.settings) {
+          const s = data.settings;
+          soundOn = !!s.soundOn;
+          autoPlay = !!s.autoPlay;
+          volume = Math.max(0, Math.min(1, +s.volume || 1));
+          rate = Math.max(0.6, Math.min(1.6, +s.rate || 1));
+          combineMode = !!s.combineMode;
+          combineSelection = new Set((s.combineSelection || []).filter(x => LETTERS.includes(x)));
+          randomVoicePerPrompt = !!s.randomVoicePerPrompt;
+        }
+
+        // refresh UI + persist toggles
+        localStorage.setItem('soundOn', soundOn);
+        localStorage.setItem('autoPlay', autoPlay);
+        localStorage.setItem('volume', volume.toFixed(3));
+        localStorage.setItem('rate', rate.toFixed(3));
+        localStorage.setItem('combineMode', combineMode);
+        localStorage.setItem('combineSelection', JSON.stringify(Array.from(combineSelection)));
+        localStorage.setItem('randomVoicePerPrompt', randomVoicePerPrompt);
+
+        updateListButtons();
+        updateNameInputs();
+        updateSoundButton();
+        updateAutoButton();
+        updateVolumeUI();
+        updateRateUI();
+        updateCombineUI();
+        updateVoiceButtonUI();
+        updateAudioStatus();
+        switchList(currentList);
+
+        alert('Import complete ✅');
+      } catch (err) {
+        console.error(err);
+        alert('Import failed. Please select a valid JSON backup file.');
+      } finally {
+        importFile.value = '';
+      }
+    });
 
     // ===== Boot =====
     buildListButtons();
